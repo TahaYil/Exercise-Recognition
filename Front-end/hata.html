@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Egzersiz Sınıflandırma • Frontend</title>
+    <title>Hata Analizi • Frontend</title>
     <style>
         :root {
             --bg: #0f172a;
@@ -113,13 +113,10 @@
 
         <main class="main">
             <div class="topbar">
-                <h1 style="margin:0; font-size:20px;">Egzersiz Sınıflandırma</h1>
-                <div style="display:flex; gap:10px; align-items:center;">
-                    <div class="api-input">
-                        <span>API:</span>
-                        <input id="apiBase" type="text" value="http://localhost:5001" />
-                    </div>
-                    <button id="hataBtn" style="background:var(--danger);color:#fff;">Hata Analizi</button>
+                <h1 style="margin:0; font-size:20px;">Hata Analizi</h1>
+                <div class="api-input">
+                    <span>API:</span>
+                    <input id="apiBase" type="text" value="http://localhost:5001" />
                 </div>
             </div>
 
@@ -138,7 +135,7 @@
                     </div>
                     <input id="fileInput" type="file" accept="video/*" style="display:none;" />
                     <div class="actions">
-                        <button id="predictBtn" class="primary">Tahmin Yap</button>
+                        <button id="predictBtn" class="primary">Hata Analizi Yap</button>
                         <button id="resetBtn">Temizle</button>
                     </div>
                     <div id="status" class="status"></div>
@@ -154,36 +151,17 @@
                 <h3 style="margin:0 0 10px;">Sonuç</h3>
                 <div id="result">
                     <div class="result-row"><div class="label">Seçilen Model</div><div class="value" id="rModel">–</div></div>
-                    <div class="result-row"><div class="label">Tahmin ID</div><div class="value" id="rId">–</div></div>
-                    <div class="result-row"><div class="label">Tahmin Adı</div><div class="value" id="rName">–</div></div>
+                    <div class="result-row"><div class="label">Hareket Adı</div><div class="value" id="rName">–</div></div>
+                    <div class="result-row"><div class="label">Hata ID</div><div class="value" id="rErrId">–</div></div>
+                    <div class="result-row"><div class="label">Hata Adı</div><div class="value" id="rErrName">–</div></div>
                     <div class="result-row"><div class="label">Güven</div><div class="value" id="rConf">–</div></div>
-                </div>
-            </section>
-
-            <section class="card" style="margin-top:16px;">
-                <h3 style="margin:0 0 10px;">Geçmiş Tahminler</h3>
-                <div id="history">
-                    <div class="status" id="historyStatus">Henüz kayıt yok.</div>
-                    <div id="historyList"></div>
-                    <div class="actions">
-                        <button id="toggleHistoryBtn">Geçmişi Göster</button>
-                        <button id="clearHistoryBtn">Geçmişi Temizle</button>
-                    </div>
                 </div>
             </section>
         </main>
     </div>
 
     <script>
-        // Hata Analizi butonuna tıklanınca hata.html sayfasına yönlendir
-        document.addEventListener('DOMContentLoaded', function() {
-            const hataBtn = document.getElementById('hataBtn');
-            if (hataBtn) {
-                hataBtn.addEventListener('click', function() {
-                    window.location.href = 'hata.html';
-                });
-            }
-        });
+        // ...aynı JS kodları, sadece fetch url'si ve sonuç alanları değişecek...
         const dropzone = document.getElementById('dropzone');
         const fileInput = document.getElementById('fileInput');
         const preview = document.getElementById('preview');
@@ -193,17 +171,10 @@
         const apiBaseEl = document.getElementById('apiBase');
 
         const rModel = document.getElementById('rModel');
-        const rId = document.getElementById('rId');
         const rName = document.getElementById('rName');
+        const rErrId = document.getElementById('rErrId');
+        const rErrName = document.getElementById('rErrName');
         const rConf = document.getElementById('rConf');
-
-        // History elements
-        const historyStatusEl = document.getElementById('historyStatus');
-        const historyListEl = document.getElementById('historyList');
-        const clearHistoryBtn = document.getElementById('clearHistoryBtn');
-        const toggleHistoryBtn = document.getElementById('toggleHistoryBtn');
-        const history = [];
-        let historyCollapsed = true;
 
         let selectedFile = null;
         let selectedModel = 'tcn';
@@ -214,8 +185,9 @@
 
         const clearResult = () => {
             rModel.textContent = '–';
-            rId.textContent = '–';
             rName.textContent = '–';
+            rErrId.textContent = '–';
+            rErrName.textContent = '–';
             rConf.textContent = '–';
         };
 
@@ -253,39 +225,18 @@
             setPreview(null); clearResult(); setStatus('');
         });
 
-        const renderHistory = () => {
-            if (!history.length) {
-                historyStatusEl.textContent = 'Henüz kayıt yok.';
-                historyListEl.innerHTML = '';
-                return;
-            }
-            historyStatusEl.textContent = '';
-            historyListEl.innerHTML = history
-                .map((h, i) => `<div class="result-row"><div class="label">${String(i+1).padStart(2,'0')}</div><div class="value">${h}</div></div>`)
-                .join('');
-        };
-
-        clearHistoryBtn.addEventListener('click', () => { history.length = 0; renderHistory(); });
-        const updateHistoryVisibility = () => {
-            const hidden = historyCollapsed;
-            historyListEl.classList.toggle('hidden', hidden);
-            historyStatusEl.classList.toggle('hidden', hidden);
-            toggleHistoryBtn.textContent = hidden ? 'Geçmişi Göster' : 'Geçmişi Gizle';
-        };
-        toggleHistoryBtn.addEventListener('click', () => { historyCollapsed = !historyCollapsed; updateHistoryVisibility(); });
-
         predictBtn.addEventListener('click', async () => {
             if (!selectedFile) { setStatus('Lütfen bir video seçin.', true); return; }
 
             const apiBase = apiBaseEl.value.trim().replace(/\/$/, '');
-            const url = apiBase + '/predict';
+            const url = apiBase + '/predict/hata';
 
             const fd = new FormData();
             fd.append('video', selectedFile);
             fd.append('model', selectedModel);
 
             predictBtn.disabled = true;
-            setStatus('Yükleniyor ve tahmin yapılıyor…');
+            setStatus('Yükleniyor ve hata analizi yapılıyor…');
             clearResult();
 
             try {
@@ -300,32 +251,19 @@
                     return;
                 }
 
-                const { selected_model, prediction_id, prediction_name, confidence } = data;
-                rModel.textContent = selected_model ?? selectedModel;
-                rId.textContent = prediction_id ?? '–';
-                rName.textContent = prediction_name ?? '–';
+                const { movement, error_id, error_name, confidence } = data;
+                rModel.textContent = selectedModel;
+                rName.textContent = movement ?? '–';
+                rErrId.textContent = error_id ?? '–';
+                rErrName.textContent = error_name ?? '–';
                 const confNum = typeof confidence === 'number' ? confidence : parseFloat(confidence);
                 rConf.textContent = Number.isFinite(confNum) ? (confNum * 100).toFixed(1) + '%' : (confidence ?? '–');
-                setStatus('Tahmin tamamlandı.');
-
-                // Append to history as a plain string: "model : tahmin • video"
-                const fileName = selectedFile?.name || 'video';
-                const modelText = selected_model ?? selectedModel;
-                const predText = prediction_name ?? String(prediction_id ?? '–');
-                const percentText = Number.isFinite(confNum) ? (confNum * 100).toFixed(1) + '%' : '–';
-                const entry = `${modelText} : ${predText} • ${fileName} • ${percentText}`;
-                history.push(entry);
-                renderHistory();
-                updateHistoryVisibility();
+                setStatus('Hata analizi tamamlandı.');
             } catch (err) {
                 predictBtn.disabled = false;
                 setStatus('Ağ hatası: ' + (err?.message || err), true);
             }
         });
-
-        // Initial render for history
-        renderHistory();
-        updateHistoryVisibility();
     </script>
 </body>
 </html>
