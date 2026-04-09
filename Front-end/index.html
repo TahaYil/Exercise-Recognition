@@ -86,6 +86,7 @@
             cursor: pointer;
         }
         button.primary { background: var(--primary); border-color: #16a34a; color: #052e14; }
+            #webcamLiveBtn { background: var(--primary); color: #fff; border-color: #16a34a; }
         button:disabled { opacity: .6; cursor: not-allowed; }
 
         video { width: 100%; border-radius: 10px; background: #000; }
@@ -116,6 +117,7 @@
                 <h1 style="margin:0; font-size:20px;">Egzersiz Sınıflandırma</h1>
                 <div style="display:flex; gap:10px; align-items:center;">
                     <div class="api-input">
+                                            <button id="canliBtn" style="background:var(--primary);color:#fff;">Canlı Video ile Tahmin</button>
                         <span>API:</span>
                         <input id="apiBase" type="text" value="http://localhost:5001" />
                     </div>
@@ -177,7 +179,19 @@
     <script>
         // Hata Analizi butonuna tıklanınca hata.html sayfasına yönlendir
         document.addEventListener('DOMContentLoaded', function() {
+                        const canliBtn = document.getElementById('canliBtn');
+                        if (canliBtn) {
+                            canliBtn.addEventListener('click', function() {
+                                window.location.href = 'webcam.html';
+                            });
+                        }
             const hataBtn = document.getElementById('hataBtn');
+            const webcamLiveBtn = document.getElementById('webcamLiveBtn');
+            if (webcamLiveBtn) {
+                webcamLiveBtn.addEventListener('click', function() {
+                    openWebcamLiveModal();
+                });
+            }
             if (hataBtn) {
                 hataBtn.addEventListener('click', function() {
                     window.location.href = 'hata.html';
@@ -326,6 +340,86 @@
         // Initial render for history
         renderHistory();
         updateHistoryVisibility();
+
+        // --- Canlı Video Modal ve API Gönderimi ---
+        function openWebcamLiveModal() {
+            // Basit modal
+            const modal = document.createElement('div');
+            modal.style = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999;';
+            modal.innerHTML = `
+                <div style="background:#111827;padding:32px 24px;border-radius:16px;min-width:340px;max-width:95vw;box-shadow:0 8px 32px #0008;display:flex;flex-direction:column;align-items:center;">
+                    <h2 style="margin:0 0 16px;font-size:20px;">Canlı Video ile Gönder</h2>
+                    <video id="webcamVideo" autoplay playsinline style="width:320px;height:240px;background:#000;border-radius:8px;"></video>
+                    <div style="margin:16px 0 0;display:flex;gap:10px;">
+                        <button id="sendFrameBtn" class="primary">Kare Gönder</button>
+                        <button id="closeWebcamModalBtn">Kapat</button>
+                    </div>
+                    <div id="webcamStatus" class="status" style="margin-top:10px;"></div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            const video = modal.querySelector('#webcamVideo');
+            const sendFrameBtn = modal.querySelector('#sendFrameBtn');
+            const closeBtn = modal.querySelector('#closeWebcamModalBtn');
+            const statusDiv = modal.querySelector('#webcamStatus');
+
+            let stream;
+            let sending = false;
+
+            function setStatus(msg, isError) {
+                statusDiv.textContent = msg || '';
+                statusDiv.className = 'status' + (isError ? ' error' : '');
+            }
+
+            // Kamera aç
+            navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+                .then(s => {
+                    stream = s;
+                    video.srcObject = stream;
+                })
+                .catch(() => setStatus('Kamera açılamadı.', true));
+
+            closeBtn.onclick = () => {
+                if (stream) stream.getTracks().forEach(t => t.stop());
+                modal.remove();
+            };
+
+            sendFrameBtn.onclick = async () => {
+                if (sending) return;
+                sending = true;
+                setStatus('Kare gönderiliyor...');
+                try {
+                    // Video karesini canvas ile al
+                    const canvas = document.createElement('canvas');
+                    canvas.width = video.videoWidth || 320;
+                    canvas.height = video.videoHeight || 240;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const dataUrl = canvas.toDataURL('image/jpeg');
+
+                    // API'ye gönder
+                    const apiBase = document.getElementById('apiBase').value.trim().replace(/\/$/, '');
+                    const model = selectedModel;
+                    const session_id = 'webcam_' + Date.now();
+                    const body = JSON.stringify({ image: dataUrl, session_id, model });
+                    const res = await fetch(apiBase + '/webcam/frame/hata', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        setStatus((data.error || 'API hatası'), true);
+                    } else {
+                        setStatus('Başarılı: ' + (data.prediction_name || '-') + (data.error_name ? ' | Hata: ' + data.error_name : ''));
+                    }
+                } catch (err) {
+                    setStatus('Ağ hatası: ' + (err?.message || err), true);
+                }
+                sending = false;
+            };
+        }
     </script>
 </body>
 </html>

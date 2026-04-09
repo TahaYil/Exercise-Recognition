@@ -112,6 +112,7 @@
         </aside>
 
         <main class="main">
+                        <button id="homeBtn" style="background:var(--primary);color:#fff;margin-bottom:18px;">Ana Sayfa</button>
             <div class="topbar">
                 <h1 style="margin:0; font-size:20px;">Hata Analizi</h1>
                 <div class="api-input">
@@ -161,6 +162,7 @@
     </div>
 
     <script>
+            document.getElementById('homeBtn').onclick = function() { window.location.href = 'index.html'; };
         // ...aynı JS kodları, sadece fetch url'si ve sonuç alanları değişecek...
         const dropzone = document.getElementById('dropzone');
         const fileInput = document.getElementById('fileInput');

@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Canlı Hata Analizi</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #111827;
+            --muted: #9ca3af;
+            --text: #e5e7eb;
+            --primary: #22c55e;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --border: #1f2937;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+            min-height: 100vh;
+        }
+        .layout {
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            min-height: 100vh;
+        }
+
+        /* ── SIDEBAR ── */
+        .sidebar {
+            padding: 20px;
+            background: var(--panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .sidebar h2 { font-size: 16px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+
+        .api-row { display: flex; flex-direction: column; gap: 6px; }
+        .api-row label { font-size: 12px; color: var(--muted); }
+        .api-row input {
+            padding: 8px 10px;
+            background: #0b1220;
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 6px;
+            font-size: 13px;
+            width: 100%;
+        }
+
+        /* buffer progress */
+        .buf-wrap { display: flex; flex-direction: column; gap: 6px; }
+        .buf-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+        .buf-bar-bg { background: var(--border); border-radius: 4px; height: 6px; overflow: hidden; }
+        .buf-bar { height: 100%; background: var(--warning); border-radius: 4px; width: 0%; transition: width .15s, background .3s; }
+        .buf-bar.ready { background: var(--primary); }
+
+        /* sonuç kutuları */
+        .result-block { display: flex; flex-direction: column; gap: 10px; }
+        .result-item {
+            background: #0b1220;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+        .result-item .ri-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+        .result-item .ri-value { font-size: 15px; font-weight: 600; color: var(--text); }
+        .result-item .ri-value.ok   { color: var(--primary); }
+        .result-item .ri-value.err  { color: var(--danger); }
+        .result-item .ri-value.warn { color: var(--warning); }
+
+        /* ── MAIN ── */
+        .main { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .topbar h1 { font-size: 20px; }
+
+        .home-btn {
+            padding: 8px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #0b1220;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        /* kamera + canvas */
+        .cam-wrap {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #000;
+            aspect-ratio: 4/3;
+            max-height: 520px;
+        }
+        .cam-wrap video,
+        .cam-wrap canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .cam-wrap canvas { pointer-events: none; }
+
+        /* overlay badge */
+        .cam-badge {
+            position: absolute;
+            top: 12px; left: 12px;
+            background: rgba(0,0,0,.65);
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 13px;
+            line-height: 1.7;
+            pointer-events: none;
+            backdrop-filter: blur(4px);
+        }
+        .cam-badge .fps { color: var(--primary); }
+        .cam-badge .pose-no { color: var(--danger); }
+
+        .error-banner {
+            position: absolute;
+            bottom: 16px; left: 50%; transform: translateX(-50%);
+            background: rgba(239,68,68,.85);
+            border-radius: 8px;
+            padding: 8px 18px;
+            font-size: 13px;
+            font-weight: 600;
+            display: none;
+            white-space: nowrap;
+            backdrop-filter: blur(4px);
+        }
+
+        /* kontrol butonları */
+        .controls { display: flex; gap: 10px; }
+        button {
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #0b1220;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 14px;
+            transition: opacity .15s;
+        }
+        button:disabled { opacity: .5; cursor: not-allowed; }
+        button.primary { background: var(--primary); border-color: #16a34a; color: #052e14; font-weight: 600; }
+        button.danger  { background: var(--danger);  border-color: #b91c1c; color: #fff; font-weight: 600; }
+
+        .status-bar { font-size: 13px; color: var(--muted); }
+        .status-bar.err { color: var(--danger); }
+    </style>
+</head>
+<body>
+<div class="layout">
+
+    <!-- ── SIDEBAR ── -->
+    <aside class="sidebar">
+        <div>
+            <h2>API</h2>
+            <div class="api-row" style="margin-top:10px;">
+                <label>Adres</label>
+                <input id="apiBase" type="text" value="http://localhost:5001" />
+            </div>
+        </div>
+
+        <div class="buf-wrap">
+            <h2>Buffer</h2>
+            <div style="margin-top:8px;">
+                <div class="buf-label">
+                    <span id="bufText">0 / 100 frame</span>
+                    <span id="bufPct">0%</span>
+                </div>
+                <div class="buf-bar-bg" style="margin-top:6px;">
+                    <div class="buf-bar" id="bufBar"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="result-block">
+            <h2>Sonuç</h2>
+            <div class="result-item">
+                <div class="ri-label">Hareket</div>
+                <div class="ri-value" id="rName">–</div>
+            </div>
+            <div class="result-item">
+                <div class="ri-label">Güven</div>
+                <div class="ri-value" id="rConf">–</div>
+            </div>
+            <div class="result-item">
+                <div class="ri-label">Hata</div>
+                <div class="ri-value" id="rErrName">–</div>
+            </div>
+            <div class="result-item">
+                <div class="ri-label">Hata Güveni</div>
+                <div class="ri-value" id="rErrConf">–</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ── MAIN ── -->
+    <main class="main">
+        <div class="topbar">
+            <h1>Canlı Hata Analizi</h1>
+            <button class="home-btn" onclick="window.location.href='index.html'">← Ana Sayfa</button>
+        </div>
+
+        <div class="cam-wrap">
+            <video id="video" autoplay muted playsinline></video>
+            <canvas id="canvas"></canvas>
+
+            <div class="cam-badge">
+                <div>FPS: <span class="fps" id="fpsVal">–</span></div>
+                <div id="poseStatus"></div>
+            </div>
+
+            <div class="error-banner" id="errorBanner"></div>
+        </div>
+
+        <div class="controls">
+            <button class="primary" id="startBtn">Kamerayı Başlat</button>
+            <button class="danger"  id="stopBtn"  disabled>Durdur</button>
+            <button id="resetBtn" disabled>🔄 Buffer Sıfırla</button>
+        </div>
+
+        <div class="status-bar" id="statusBar">Başlatmak için "Kamerayı Başlat" butonuna tıklayın.</div>
+    </main>
+</div>
+
+<script>
+const SESSION_ID = crypto.randomUUID();
+const MIN_NEEDED = 100;
+
+const video      = document.getElementById('video');
+const canvas     = document.getElementById('canvas');
+const ctx        = canvas.getContext('2d');
+const startBtn   = document.getElementById('startBtn');
+const stopBtn    = document.getElementById('stopBtn');
+const resetBtn   = document.getElementById('resetBtn');
+const statusBar  = document.getElementById('statusBar');
+const fpsVal     = document.getElementById('fpsVal');
+const poseStatus = document.getElementById('poseStatus');
+const errorBanner= document.getElementById('errorBanner');
+const bufText    = document.getElementById('bufText');
+const bufPct     = document.getElementById('bufPct');
+const bufBar     = document.getElementById('bufBar');
+const rName      = document.getElementById('rName');
+const rConf      = document.getElementById('rConf');
+const rErrName   = document.getElementById('rErrName');
+const rErrConf   = document.getElementById('rErrConf');
+
+let stream    = null;
+let timer     = null;
+let sending   = false;
+let lastTime  = Date.now();
+let running   = false;
+
+function getApi() {
+    return document.getElementById('apiBase').value.trim().replace(/\/$/, '');
+}
+
+function setStatus(msg, isErr = false) {
+    statusBar.textContent = msg;
+    statusBar.className = 'status-bar' + (isErr ? ' err' : '');
+}
+
+function updateBuffer(buf, needed) {
+    const pct = Math.min(100, Math.round((buf / needed) * 100));
+    bufText.textContent = `${buf} / ${needed} frame`;
+    bufPct.textContent  = pct + '%';
+    bufBar.style.width  = pct + '%';
+    bufBar.classList.toggle('ready', buf >= needed);
+}
+
+function updateResult(data) {
+    if (data.status === 'collecting') {
+        updateBuffer(data.buffer, data.needed);
+        poseStatus.innerHTML = data.pose_detected
+            ? ''
+            : '<span class="pose-no">Poz algılanamadı</span>';
+        rName.textContent    = '–';
+        rConf.textContent    = '–';
+        rErrName.textContent = '–';
+        rErrConf.textContent = '–';
+        errorBanner.style.display = 'none';
+        return;
+    }
+
+    // status === 'ok'
+    updateBuffer(data.buffer, 200);
+    poseStatus.innerHTML = data.pose_detected
+        ? ''
+        : '<span class="pose-no">Poz algılanamadı</span>';
+
+    rName.textContent = (data.prediction_name || '–').toUpperCase();
+    rName.className   = 'ri-value ok';
+
+    const conf = typeof data.confidence === 'number' ? data.confidence : parseFloat(data.confidence);
+    rConf.textContent = Number.isFinite(conf) ? (conf * 100).toFixed(1) + '%' : '–';
+
+    const errName = data.error_name || null;
+    const errConf = typeof data.error_confidence === 'number'
+        ? data.error_confidence
+        : parseFloat(data.error_confidence);
+
+    if (errName && errName !== 'dogru') {
+        rErrName.textContent = errName.toUpperCase();
+        rErrName.className   = 'ri-value err';
+        rErrConf.textContent = Number.isFinite(errConf) ? (errConf * 100).toFixed(1) + '%' : '–';
+        errorBanner.textContent    = '⚠ ' + errName.replace(/_/g, ' ').toUpperCase();
+        errorBanner.style.display  = 'block';
+    } else {
+        rErrName.textContent = errName ? 'DOĞRU' : '–';
+        rErrName.className   = 'ri-value ok';
+        rErrConf.textContent = Number.isFinite(errConf) ? (errConf * 100).toFixed(1) + '%' : '–';
+        errorBanner.style.display = 'none';
+    }
+}
+
+async function sendFrame() {
+    if (sending || !running) return;
+    sending = true;
+
+    // canvas'a çiz
+    canvas.width  = video.videoWidth  || 640;
+    canvas.height = video.videoHeight || 480;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // toBlob — base64'ten çok daha hızlı
+    canvas.toBlob(async (blob) => {
+        const fd = new FormData();
+        fd.append('image', blob, 'frame.jpg');
+        fd.append('session_id', SESSION_ID);
+
+        try {
+            const res  = await fetch(getApi() + '/webcam/frame/hata', { method: 'POST', body: fd });
+            const data = await res.json();
+            updateResult(data);
+        } catch (e) {
+            setStatus('API hatası: ' + e.message, true);
+        }
+
+        // FPS
+        const now = Date.now();
+        fpsVal.textContent = Math.round(1000 / (now - lastTime));
+        lastTime = now;
+        sending  = false;
+    }, 'image/jpeg', 0.6);
+}
+
+// ── BACKEND: FormData'yı kabul edecek şekilde güncellenmeli ──
+// Eğer backend hâlâ JSON/base64 bekliyorsa şu alternatifi kullan:
+async function sendFrameBase64() {
+    if (sending || !running) return;
+    sending = true;
+
+    canvas.width  = video.videoWidth  || 640;
+    canvas.height = video.videoHeight || 480;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const b64 = canvas.toDataURL('image/jpeg', 0.6);
+
+    try {
+        const res  = await fetch(getApi() + '/webcam/frame/hata', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: b64, session_id: SESSION_ID })
+        });
+        const data = await res.json();
+        updateResult(data);
+    } catch (e) {
+        setStatus('API hatası: ' + e.message, true);
+    }
+
+    const now = Date.now();
+    fpsVal.textContent = Math.round(1000 / (now - lastTime));
+    lastTime = now;
+    sending  = false;
+}
+
+// Backend FormData destekliyorsa sendFrame, yoksa sendFrameBase64 kullan
+// Şu an backend JSON/base64 aldığı için sendFrameBase64 aktif:
+const SEND_FN = sendFrameBase64;
+
+startBtn.addEventListener('click', async () => {
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+        video.srcObject = stream;
+        await video.play();
+
+        running = true;
+        timer   = setInterval(SEND_FN, 33); // ~30 FPS
+
+        startBtn.disabled = true;
+        stopBtn.disabled  = false;
+        resetBtn.disabled = false;
+        setStatus('Canlı analiz başladı…');
+    } catch (e) {
+        setStatus('Kamera açılamadı: ' + e.message, true);
+    }
+});
+
+stopBtn.addEventListener('click', () => {
+    running = false;
+    clearInterval(timer);
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null;
+    video.srcObject = null;
+
+    startBtn.disabled = false;
+    stopBtn.disabled  = true;
+    resetBtn.disabled = true;
+    setStatus('Durduruldu.');
+});
+
+resetBtn.addEventListener('click', async () => {
+    try {
+        await fetch(getApi() + '/webcam/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: SESSION_ID })
+        });
+        updateBuffer(0, MIN_NEEDED);
+        rName.textContent = rConf.textContent = rErrName.textContent = rErrConf.textContent = '–';
+        errorBanner.style.display = 'none';
+        setStatus('Buffer sıfırlandı.');
+    } catch(e) {
+        setStatus('Reset hatası: ' + e.message, true);
+    }
+});
+</script>
+</body>
+</html>
